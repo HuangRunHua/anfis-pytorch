@@ -19,30 +19,54 @@ import torch.nn.functional as F
 
 dtype = torch.float
 
-
+"""
+    @FuzzifyVariable(torch.nn.Module)
+    类成员变量:
+        - mfdefs: 单个隶属函数/隶属函数列表
+        - padding:
+"""
 class FuzzifyVariable(torch.nn.Module):
-    '''
-        Represents a single fuzzy variable, holds a list of its MFs.
-        Forward pass will then fuzzify the input (value for each MF).
-    '''
+    """
+        初始化FuzzifyVariable类,
+        初始化参数为
+            - 隶属函数类(mfdefs = mfdef)
+            - 隶属函数类列表(mfdefs = [mfdef, ...])
+    """
     def __init__(self, mfdefs):
         super(FuzzifyVariable, self).__init__()
-        if isinstance(mfdefs, list):  # No MF names supplied
+        # 判断mfdefs是否为类列表
+        if isinstance(mfdefs, list): 
+            # mfnames = ['mf0', 'mf1', ...]
             mfnames = ['mf{}'.format(i) for i in range(len(mfdefs))]
+            """
+                mfdefs为有顺序的字典
+                mfdefs = OrderedDict(
+                    [
+                        ('mf0', [GaussMembFunc(), ...]),
+                        ('mf1', [GaussMembFunc(), ...]),
+                    ]
+                )
+            """
             mfdefs = OrderedDict(zip(mfnames, mfdefs))
+        # 转为模型可识别的类型
         self.mfdefs = torch.nn.ModuleDict(mfdefs)
         self.padding = 0
 
     @property
     def num_mfs(self):
-        '''Return the actual number of MFs (ignoring any padding)'''
         return len(self.mfdefs)
 
+    """
+        @members(self)
+        返回可迭代的元组
+        return = odict_items(
+            [
+                ('mf0', [GaussMembFunc(), ...]),
+                ('mf1', [GaussMembFunc(), ...]),
+            ]
+        )
+    """
     def members(self):
-        '''
-            Return an iterator over this variables's membership functions.
-            Yields tuples of the form (mf-name, MembFunc-object)
-        '''
         return self.mfdefs.items()
 
     def pad_to(self, new_size):
@@ -52,20 +76,24 @@ class FuzzifyVariable(torch.nn.Module):
         '''
         self.padding = new_size - len(self.mfdefs)
 
+    """
+        @fuzzify(self, x)
+        为这些输入值生成(函数名, 模糊值)列表。
+    """
     def fuzzify(self, x):
-        '''
-            Yield a list of (mf-name, fuzzy values) for these input values.
-        '''
         for mfname, mfdef in self.mfdefs.items():
+            # 获取模糊值, 将x带入隶属函数中进行求解
             yvals = mfdef(x)
             yield(mfname, yvals)
 
+    """
+        @forward(self, x)
+        返回模糊值张量
+        x.shape: n_cases
+        y.shape: n_cases * n_mfs
+    """
     def forward(self, x):
-        '''
-            Return a tensor giving the membership value for each MF.
-            x.shape: n_cases
-            y.shape: n_cases * n_mfs
-        '''
+        # 利用隶属函数计算模糊值, 结果进行横向拼装
         y_pred = torch.cat([mf(x) for mf in self.mfdefs.values()], dim=1)
         if self.padding > 0:
             y_pred = torch.cat([y_pred,
@@ -129,18 +157,39 @@ class FuzzifyLayer(torch.nn.Module):
 
 
 class AntecedentLayer(torch.nn.Module):
-    '''
-        Form the 'rules' by taking all possible combinations of the MFs
-        for each variable. Forward pass then calculates the fire-strengths.
-    '''
+    """
+        初始化第二层与第三层网络
+        初始化参数为:
+            - varlist: FuzzifyVariable类列表
+    """
     def __init__(self, varlist):
         super(AntecedentLayer, self).__init__()
-        # Count the (actual) mfs for each variable:
+        # 计算隶属函数的个数
         mf_count = [var.num_mfs for var in varlist]
         # Now make the MF indices for each rule:
+        """
+            @itertools.product
+            Input : arr1 = [1, 2, 3] 
+                    arr2 = [5, 6, 7] 
+            Output : [(1, 5), (1, 6), (1, 7), (2, 5), (2, 6), (2, 7), (3, 5), (3, 6), (3, 7)] 
+            生成第二层触发强度的乘积索引值
+        """
         mf_indices = itertools.product(*[range(n) for n in mf_count])
+        """
+            假定invardefs = [
+                    ['x0', ['f1', 'f2', 'f3']],
+                    ['x1', ['f4', 'f5']],
+                ]
+            则self.mf_indices = tensor([[0, 0],
+                                        [0, 1],
+                                        [1, 0],
+                                        [1, 1],
+                                        [2, 0],
+                                        [2, 1]])
+            [0, 0]表示x0的第一个模糊值与x0的第一个模糊值
+            mf_indices.shape = n_rules * n_in
+        """
         self.mf_indices = torch.tensor(list(mf_indices))
-        # mf_indices.shape is n_rules * n_in
 
     def num_rules(self):
         return len(self.mf_indices)
@@ -266,12 +315,6 @@ class PlainConsequentLayer(ConsequentLayer):
         '''
         return self.coefficients
 
-    def fit_coeff(self, x, weights, y_actual):
-        '''
-        '''
-        assert False,\
-            'Not hybrid learning: I\'m using BP to learn coefficients'
-
 
 class WeightedSumLayer(torch.nn.Module):
     '''
@@ -298,16 +341,11 @@ class WeightedSumLayer(torch.nn.Module):
         - description: 描述语句
         - outvarnames: 网络输出结果
         - hybrid: 是否使用混合最小二乘法
-        - num_in: 
-        - num_rules: 
-        - layer: 
+        - num_in: 网络输入变量个数
+        - num_rules: 触发强度的个数/第二层元素的个数
+        - layer: 网络的所有层
 """
 class AnfisNet(torch.nn.Module):
-    '''
-        This is a container for the 5 layers of the ANFIS net.
-        The forward pass maps inputs to outputs based on current settings,
-        and then fit_coeff will adjust the TSK coeff using LSE.
-    '''
     """
         ANFIS网络初始化部分
         网络输入参数:
@@ -321,18 +359,32 @@ class AnfisNet(torch.nn.Module):
         self.description = description
         self.outvarnames = outvarnames
         self.hybrid = hybrid
+        # 获取输入变量名称列表 varnames = ['x0', 'x1', ...]
         varnames = [v for v, _ in invardefs]
         mfdefs = [FuzzifyVariable(mfs) for _, mfs in invardefs]
+        # 计算网络输入变量个数
         self.num_in = len(invardefs)
+        """
+            计算触发强度的个数
+            获取每个输入变量隶属函数的个数，形成列表，再计算个数的乘积:
+            invardefs = [
+                ['x0', ['f1', 'f2', 'f3']],
+                ['x1', ['f4', 'f5']],
+            ]
+            self.num_rules = 6
+        """
         self.num_rules = np.prod([len(mfs) for _, mfs in invardefs])
         if self.hybrid:
             cl = ConsequentLayer(self.num_in, self.num_rules, self.num_out)
         else:
             cl = PlainConsequentLayer(self.num_in, self.num_rules, self.num_out)
         self.layer = torch.nn.ModuleDict(OrderedDict([
+            # 第一层
             ('fuzzify', FuzzifyLayer(mfdefs, varnames)),
+            # 
             ('rules', AntecedentLayer(mfdefs)),
             # normalisation layer is just implemented as a function.
+            # 第四层
             ('consequent', cl),
             # weighted-sum layer is just implemented as a function.
             ]))
