@@ -292,13 +292,30 @@ class WeightedSumLayer(torch.nn.Module):
         y_pred = torch.bmm(tsk, weights.unsqueeze(2))
         return y_pred.squeeze(2)
 
-
+"""
+    @AnfisNet(torch.nn.Module)
+    类网络成员变量:
+        - description: 描述语句
+        - outvarnames: 网络输出结果
+        - hybrid: 是否使用混合最小二乘法
+        - num_in: 
+        - num_rules: 
+        - layer: 
+"""
 class AnfisNet(torch.nn.Module):
     '''
         This is a container for the 5 layers of the ANFIS net.
         The forward pass maps inputs to outputs based on current settings,
         and then fit_coeff will adjust the TSK coeff using LSE.
     '''
+    """
+        ANFIS网络初始化部分
+        网络输入参数:
+            - description: 描述语句, 如'Simple classifier'
+            - invardefs: 输入变量与隶属函数列表, 如: invardefs = [['x0', [GaussMembFunc(), ...]], ...]
+            - outvarnames: 网络输出结果, 如: outvarsnames = ['y0', 'y1', ...]
+            - hybrid: 是否使用混合最小二乘法
+    """
     def __init__(self, description, invardefs, outvarnames, hybrid=True):
         super(AnfisNet, self).__init__()
         self.description = description
