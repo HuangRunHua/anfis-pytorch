@@ -156,6 +156,11 @@ class FuzzifyLayer(torch.nn.Module):
         return y_pred
 
 
+"""
+    @AntecedentLayer(torch.nn.Module)
+    类成员变量:
+        - mf_indices: 第二层触发强度的乘积索引值
+"""
 class AntecedentLayer(torch.nn.Module):
     """
         初始化第二层与第三层网络
@@ -166,7 +171,6 @@ class AntecedentLayer(torch.nn.Module):
         super(AntecedentLayer, self).__init__()
         # 计算隶属函数的个数
         mf_count = [var.num_mfs for var in varlist]
-        # Now make the MF indices for each rule:
         """
             @itertools.product
             Input : arr1 = [1, 2, 3] 
@@ -186,7 +190,7 @@ class AntecedentLayer(torch.nn.Module):
                                         [1, 1],
                                         [2, 0],
                                         [2, 1]])
-            [0, 0]表示x0的第一个模糊值与x0的第一个模糊值
+            [0, 0]表示x0的第一个模糊值与x1的第一个模糊值
             mf_indices.shape = n_rules * n_in
         """
         self.mf_indices = torch.tensor(list(mf_indices))
@@ -194,6 +198,19 @@ class AntecedentLayer(torch.nn.Module):
     def num_rules(self):
         return len(self.mf_indices)
 
+    """
+        @extra_repr(self, varlist=None):
+        触发强度乘积索引值更加精确的描述:
+        invardefs = [
+            ['x0', ['f1', 'f2', 'f3']],
+            ['x1', ['f4', 'f5']],
+        ]
+        则返回为
+            x0 is f1 and x1 is f4
+            x0 is f1 and x1 is f5
+            x0 is f2 and x1 is f4
+            ...
+    """
     def extra_repr(self, varlist=None):
         if not varlist:
             return None
@@ -212,9 +229,9 @@ class AntecedentLayer(torch.nn.Module):
             x.shape = n_cases * n_in * n_mfs
             y.shape = n_cases * n_rules
         '''
-        # Expand (repeat) the rule indices to equal the batch size:
+        # 重复规则索引以等于批量大小：
         batch_indices = self.mf_indices.expand((x.shape[0], -1, -1))
-        # Then use these indices to populate the rule-antecedents
+        # 使用索引来填充规则前提
         ants = torch.gather(x.transpose(1, 2), 1, batch_indices)
         # ants.shape is n_cases * n_rules * n_in
         # Last, take the AND (= product) for each rule-antecedent
@@ -381,7 +398,7 @@ class AnfisNet(torch.nn.Module):
         self.layer = torch.nn.ModuleDict(OrderedDict([
             # 第一层
             ('fuzzify', FuzzifyLayer(mfdefs, varnames)),
-            # 
+            # 第二三层
             ('rules', AntecedentLayer(mfdefs)),
             # normalisation layer is just implemented as a function.
             # 第四层
@@ -423,6 +440,9 @@ class AnfisNet(torch.nn.Module):
         '''
         return self.outvarnames
 
+    """
+        获取IF-THEN准则
+    """
     def extra_repr(self):
         rstr = []
         vardefs = self.layer['fuzzify'].varmfs
@@ -443,6 +463,7 @@ class AnfisNet(torch.nn.Module):
         self.weights = F.normalize(self.raw_weights, p=1, dim=1)
         self.rule_tsk = self.layer['consequent'](x)
         # y_pred = self.layer['weighted_sum'](self.weights, self.rule_tsk)
+        # 计算两个tensor的矩阵乘法
         y_pred = torch.bmm(self.rule_tsk, self.weights.unsqueeze(2))
         self.y_pred = y_pred.squeeze(2)
         return self.y_pred
