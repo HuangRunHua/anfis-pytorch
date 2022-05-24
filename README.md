@@ -65,26 +65,21 @@ def make_gauss_mfs(sigma, mu_list):
 ```python
 def make_anfis(x, num_mfs=5, num_out=1, hybrid=True):
     # 获取输入量的个数
-    
     num_invars = x.shape[1]
     # 沿着x每列求最大值和最小值
-    
     minvals, _ = torch.min(x, dim=0)
     maxvals, _ = torch.max(x, dim=0)
     # 得到输入各个状态量的取值范围
-    
     ranges = maxvals-minvals
     invars = []
     for i in range(num_invars):
         # 计算高斯隶属函数的方差
-        
         sigma = ranges[i] / num_mfs
         mulist = torch.linspace(minvals[i], maxvals[i], num_mfs).tolist()
         invars.append(('x{}'.format(i), make_gauss_mfs(sigma, mulist)))
     outvars = ['y{}'.format(i) for i in range(num_out)]
 
     # 将 invars 和 outvars 作为参数传入 AnfisNet() 建立 ANFIS 网络
-    
     model = AnfisNet('Simple classifier', invars, outvars, hybrid=hybrid)
     return model
 ```
@@ -232,34 +227,23 @@ def forward(self, x):
 `FuzzifyVariable(torch.nn.Module)类`定义了模糊化的基础操作。其类初始化方法为:
 ```python
 # mfdefs的类型为GaussMembFunc或[GaussMembFunc, GaussMembFunc]
-
 def __init__(self, mfdefs):
     super(FuzzifyVariable, self).__init__()
     # 判断mfdefs是否为隶属函数类列表
-    
     if isinstance(mfdefs, list): 
         # mfnames = ['mf0', 'mf1', ...]
         mfnames = ['mf{}'.format(i) for i in range(len(mfdefs))]
         """
-        
             mfdefs为有顺序的字典
-            
             mfdefs = OrderedDict(
-            
                 [
-                
                     ('mf0', [GaussMembFunc(), ...]),
-                    
-                    ('mf1', [GaussMembFunc(), ...]),
-                    
-                ]
-                
-            )
-            
+                    ('mf1', [GaussMembFunc(), ...]),      
+                ]      
+            ) 
         """
         mfdefs = OrderedDict(zip(mfnames, mfdefs))
     # 转为模型可识别的类型
-    
     self.mfdefs = torch.nn.ModuleDict(mfdefs)
     self.padding = 0
 ```
@@ -272,7 +256,6 @@ def __init__(self, mfdefs):
 ```python
 def forward(self, x):
     # 利用隶属函数计算模糊值, 结果进行横向拼装
-    
     y_pred = torch.cat([mf(x) for mf in self.mfdefs.values()], dim=1)
     if self.padding > 0:
         y_pred = torch.cat([y_pred,
@@ -347,15 +330,11 @@ self.mf_indices = tensor([[0, 0],
 ```python
 def forward(self, x):
     # 重复规则索引以等于批量大小：
-    
     batch_indices = self.mf_indices.expand((x.shape[0], -1, -1))
     # 使用索引来填充规则前提
-    
     ants = torch.gather(x.transpose(1, 2), 1, batch_indices)
     # ants.shape is n_cases * n_rules * n_in
-    
     # Last, take the AND (= product) for each rule-antecedent
-    
     rules = torch.prod(ants, dim=2)
     return rules
 ```
@@ -365,33 +344,22 @@ def forward(self, x):
 ```python
 def fit_coeff(self, x, weights, y_actual):
     '''
-    
         Use LSE to solve for coeff: y_actual = coeff * (weighted)x
-        
-                x.shape: n_cases * n_in
-                
+                x.shape: n_cases * n_in    
         weights.shape: n_cases * n_rules
-        
         [ coeff.shape: n_rules * n_out * (n_in+1) ]
-        
-                y.shape: n_cases * n_out
-                
+                y.shape: n_cases * n_out        
     '''
     # Append 1 to each list of input vals, for the constant term:
-    
     x_plus = torch.cat([x, torch.ones(x.shape[0], 1)], dim=1)
     # Shape of weighted_x is n_cases * n_rules * (n_in+1)
-    
     weighted_x = torch.einsum('bp, bq -> bpq', weights, x_plus)
     # Can't have value 0 for weights, or LSE won't work:
-    
     weighted_x[weighted_x == 0] = 1e-12
     # Squash x and y down to 2D matrices for gels:
-    
     weighted_x_2d = weighted_x.view(weighted_x.shape[0], -1)
     y_actual_2d = y_actual.view(y_actual.shape[0], -1)
     # Use gels to do LSE, then pick out the solution rows:
-    
     try:
         coeff_2d, _ = torch.gels(y_actual_2d, weighted_x_2d)
     except RuntimeError as e:
@@ -400,7 +368,6 @@ def fit_coeff(self, x, weights, y_actual):
         raise e
     coeff_2d = coeff_2d[0:weighted_x_2d.shape[1]]
     # Reshape to 3D tensor: divide by rules, n_in+1, then swap last 2 dims
-    
     self.coeff = coeff_2d.view(weights.shape[1], x.shape[1]+1, -1).transpose(1, 2)
     # coeff dim is thus: n_rules * n_out * (n_in+1)
 ```
@@ -408,21 +375,14 @@ def fit_coeff(self, x, weights, y_actual):
 ```python
 def forward(self, x):
     '''
-    
         Calculate: y = coeff * x + const   [NB: no weights yet]
-        
-                x.shape: n_cases * n_in
-                
-            coeff.shape: n_rules * n_out * (n_in+1)
-            
-                y.shape: n_cases * n_out * n_rules
-                
+                x.shape: n_cases * n_in             
+            coeff.shape: n_rules * n_out * (n_in+1)     
+                y.shape: n_cases * n_out * n_rules             
     '''
     # Append 1 to each list of input vals, for the constant term:
-    
     x_plus = torch.cat([x, torch.ones(x.shape[0], 1)], dim=1)
     # Need to switch dimansion for the multipy, then switch back:
-    
     y_pred = torch.matmul(self.coeff, x_plus.t())
     return y_pred.transpose(0, 2)  # swaps cases and rules
 ```
@@ -432,29 +392,20 @@ def forward(self, x):
 ```python
 class WeightedSumLayer(torch.nn.Module):
     '''
-    
         Sum the TSK for each outvar over rules, weighted by fire strengths.
-        
         This could/should be layer 5 of the Anfis net.
-        
         I don't actually use this class, since it's just one line of code.
-        
     '''
     def __init__(self):
         super(WeightedSumLayer, self).__init__()
 
     def forward(self, weights, tsk):
         '''
-        
             weights.shape: n_cases * n_rules
-            
-                tsk.shape: n_cases * n_out * n_rules
-                
-             y_pred.shape: n_cases * n_out
-             
+                tsk.shape: n_cases * n_out * n_rules    
+             y_pred.shape: n_cases * n_out     
         '''
         # Add a dimension to weights to get the bmm to work:
-        
         y_pred = torch.bmm(tsk, weights.unsqueeze(2))
         return y_pred.squeeze(2)
 ```
@@ -476,14 +427,11 @@ class WeightedSumLayer(torch.nn.Module):
 def train_anfis_with(model, data, optimizer, criterion,
                      epochs=500, show_plots=False):
     '''
-    
         Train the given model using the given (x,y) data.
-        
     '''
     errors = []  # Keep a list of these for plotting afterwards
     
     # optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    
     print('### Training for {} epochs, training size = {} cases'.
           format(epochs, data.dataset.tensors[0].shape[0]))
     for t in range(epochs):
@@ -492,30 +440,24 @@ def train_anfis_with(model, data, optimizer, criterion,
         for x, y_actual in data:
             y_pred = model(x)
             # Compute and print loss
-            
             loss = criterion(y_pred, y_actual)
-            # Zero gradients, perform a backward pass, and update the weights.
-            
+            # Zero gradients, perform a backward pass, and update the weights. 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
         # Epoch ending, so now fit the coefficients based on all data:
-        
         x, y_actual = data.dataset.tensors
         with torch.no_grad():
             model.fit_coeff(x, y_actual)
         # Get the error rate for the whole batch:
-        
         y_pred = model(x)
         mse, rmse, perc_loss = calc_error(y_pred, y_actual)
         errors.append(perc_loss)
         # Print some progress information as the net is trained:
-        
         if epochs < 30 or t % 10 == 0:
             print('epoch {:4d}: MSE={:.5f}, RMSE={:.5f} ={:.2f}%'
                   .format(t, mse, rmse, perc_loss))
     # End of training, so graph the results:
-    
     if show_plots:
         plotErrors(errors)
         y_actual = data.dataset.tensors[1]
