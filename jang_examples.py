@@ -33,11 +33,9 @@ def sinc(x, y):
 
 
 def make_sinc_xy(batch_size=1024):
-    '''
-        Generates a set of (x, y) values for the sync function.
-        Use the range (-10,10) that was used in sec. V of Jang's paper.
-    '''
+    # pts = tensor([-10,  -8,  -6,  -4,  -2,   0,   2,   4,   6,   8,  10])
     pts = torch.arange(-10, 11, 2)
+    # x = [[-10, -10], [-10, -8], ...]两两配对共121组
     x = torch.tensor(list(itertools.product(pts, pts)), dtype=dtype)
     y = torch.tensor([[sinc(*p)] for p in x], dtype=dtype)
     td = TensorDataset(x, y)
@@ -282,7 +280,7 @@ def jang_ex4_data(filename):
 
 
 if __name__ == '__main__':
-    example = '2'
+    example = '4T'
     show_plots = True
     if len(sys.argv) == 2:  # One arg: example
         example = sys.argv[1]
